@@ -2189,21 +2189,5 @@ fn media_type(path: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn relationships_cannot_escape_package_root() {
-        assert!(resolve_target("word/document.xml", "../../secret").is_err());
-        assert_eq!(
-            resolve_target("word/document.xml", "media/a.png").unwrap(),
-            "word/media/a.png"
-        );
-    }
-
-    #[test]
-    fn localized_headings_are_recognized() {
-        assert_eq!(heading_from_name("Überschrift 2"), Some(2));
-        assert_eq!(heading_from_name("Heading 7"), Some(6));
-    }
-}
+#[path = "../tests/unit/parser.rs"]
+mod tests;
