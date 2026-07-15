@@ -501,26 +501,5 @@ fn escape_id(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn markdown_text_is_escaped_before_formatting() {
-        let mut out = String::new();
-        render_formatted(
-            "a * b | c",
-            &TextFormat {
-                bold: true,
-                ..TextFormat::default()
-            },
-            &mut out,
-            MarkdownContext::TableCell,
-        );
-        assert_eq!(out, "**a \\* b \\| c**");
-    }
-
-    #[test]
-    fn metadata_cannot_close_comment() {
-        assert_eq!(sanitize_comment("x--><script>"), "x—&gt;<script&gt;");
-    }
-}
+#[path = "../tests/unit/render.rs"]
+mod tests;
