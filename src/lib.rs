@@ -1,14 +1,16 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Event-driven DOCX and ODT parsing and Markdown rendering.
+//!
+//! The crate deliberately keeps the package reader, format frontends, common
+//! document model and renderer separate. It never builds an XML DOM.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod config;
+mod error;
+mod model;
+mod package;
+mod parser;
+mod render;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use config::{ImageHandlingMode, ImageMode, ParserConfig, ParserConfigBuilder};
+pub use error::{Error, Result};
+pub use model::*;
+pub use package::{DocumentContainer, DocxContainer};
