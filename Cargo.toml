@@ -1,6 +1,28 @@
 [package]
-name = "docx-parser"
+name = "docx-to-md"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Parse Microsoft Word files (.docx) and OpenDocument Text file (.odt) into Markdown (.md)"
+repository = "https://github.com/nilskruthoff/docx-parser.git"
+readme = "README.md"
+keywords = ["docx", "markdown", "odt", "RAG", "parser"]
+categories = ["text-processing", "parser-implementations"]
+include = [
+    "/src/**",
+    "/examples/**",
+    "/README.md",
+    "/LICENCE-MIT",
+    "/LICENSE-APACHE",
+]
 
 [dependencies]
+base64 = "0.22"
+image = { version = "0.25.10", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
+quick-xml = "0.41.0"
+thiserror = "2"
+url = "2"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
