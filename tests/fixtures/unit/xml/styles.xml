@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="urn:word">
+  <w:style w:styleId="Base">
+    <w:name w:val="Base"/>
+    <w:rPr><w:b/><w:lang w:val="en-GB"/></w:rPr>
+  </w:style>
+  <w:style w:styleId="Heading2">
+    <w:name w:val="Heading 2"/>
+    <w:basedOn w:val="Base"/>
+    <w:pPr><w:outlineLvl w:val="1"/></w:pPr>
+    <w:rPr><w:i/></w:rPr>
+  </w:style>
+</w:styles>

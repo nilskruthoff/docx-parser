@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document-styles xmlns:office="urn:office" xmlns:style="urn:style" xmlns:text="urn:text" xmlns:fo="urn:fo">
+  <office:styles>
+    <style:style style:name="Emphasis" style:family="text"><style:text-properties fo:font-style="italic"/></style:style>
+    <style:style style:name="Strong" style:family="text" style:parent-style-name="Emphasis"><style:text-properties fo:font-weight="bold"/></style:style>
+    <text:list-style style:name="Bullets"><text:list-level-style-bullet text:level="1"/></text:list-style>
+    <text:list-style style:name="Numbers"><text:list-level-style-number text:level="1" text:num-format="1"/></text:list-style>
+  </office:styles>
+</office:document-styles>
