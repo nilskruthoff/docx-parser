@@ -46,7 +46,23 @@ struct NumberLevel {
 struct OdtStyle {
     parent: Option<String>,
     format: TextFormat,
-    marker: Option<ListMarker>,
+    markers: HashMap<u8, ListMarker>,
+}
+
+#[derive(Default)]
+struct OdtParsed {
+    elements: Vec<DocumentElement>,
+    comments: Vec<Annotation>,
+    footnotes: Vec<Annotation>,
+    endnotes: Vec<Annotation>,
+    sequence: usize,
+}
+
+#[derive(Default)]
+struct OdtStories {
+    sections: Vec<Section>,
+    headers: BTreeMap<String, Story>,
+    footers: BTreeMap<String, Story>,
 }
 
 #[derive(Default)]
@@ -736,7 +752,7 @@ fn parse_docx_paragraph(
                     format = TextFormat::default();
                 }
                 b"rPr" => in_run_properties = true,
-                b"t" | b"instrText" => in_text = true,
+                b"t" => in_text = true,
                 b"hyperlink" => {
                     let target = attr(&e, b"id")
                         .and_then(|id| relationship(indexes, part, &id))
@@ -753,6 +769,18 @@ fn parse_docx_paragraph(
                         let style = resolved_style(&indexes.styles, &id);
                         merge_format(&mut format, &style.format);
                         format.character_style = Some(id);
+                    }
+                }
+                b"blip" if config.extract_images => {
+                    if let Some(id) = attr(&e, b"embed") {
+                        add_image_inline(
+                            &id,
+                            part,
+                            indexes,
+                            state,
+                            &mut build.content,
+                            &mut hyperlink,
+                        );
                     }
                 }
                 _ if in_run_properties => apply_run_property(&mut format, &e),
@@ -843,7 +871,7 @@ fn parse_docx_paragraph(
                 }
                 b"r" => flush_text(&mut text, &format, &mut build.content, &mut hyperlink),
                 b"rPr" => in_run_properties = false,
-                b"t" | b"instrText" => in_text = false,
+                b"t" => in_text = false,
                 b"hyperlink" => {
                     if let Some((target, content)) = hyperlink.take() {
                         build.content.push(Inline::Hyperlink { target, content });
@@ -872,8 +900,13 @@ fn parse_docx_paragraph(
         if build.num_level.is_none() {
             build.num_level = style.num_level;
         }
+        let inherit_format = !style
+            .name
+            .as_deref()
+            .is_some_and(is_semantic_paragraph_style)
+            && !is_semantic_paragraph_style(&style_id);
         for inline in &mut build.content {
-            apply_paragraph_style(inline, &style.format, &style_id);
+            apply_paragraph_style(inline, &style.format, &style_id, inherit_format);
         }
     }
     if let Some(num_id) = &build.num_id {
@@ -911,15 +944,22 @@ fn vertical(value: &str) -> VerticalAlign {
     }
 }
 
-fn apply_paragraph_style(inline: &mut Inline, style: &TextFormat, style_id: &str) {
+fn apply_paragraph_style(
+    inline: &mut Inline,
+    style: &TextFormat,
+    style_id: &str,
+    inherit_format: bool,
+) {
     match inline {
         Inline::Text { format, .. } => {
-            merge_format(format, style);
+            if inherit_format {
+                merge_format(format, style);
+            }
             format.paragraph_style = Some(style_id.into());
         }
         Inline::Hyperlink { content, .. } => {
             for child in content {
-                apply_paragraph_style(child, style, style_id);
+                apply_paragraph_style(child, style, style_id, inherit_format);
             }
         }
         _ => {}
@@ -1091,21 +1131,48 @@ fn push_paragraph(
     indexes: &DocxIndexes,
 ) {
     let style = build.style_id.clone();
-    let mut heading = style
+    let resolved = style
         .as_deref()
-        .map(|id| resolved_style(&indexes.styles, id))
-        .and_then(|s| {
-            s.outline
-                .map(|level| level.saturating_add(1).clamp(1, 6))
-                .or_else(|| s.name.as_deref().and_then(heading_from_name))
-        });
+        .map(|id| resolved_style(&indexes.styles, id));
+    let mut heading = resolved.as_ref().and_then(|s| {
+        s.outline
+            .map(|level| level.saturating_add(1).clamp(1, 6))
+            .or_else(|| s.name.as_deref().and_then(heading_from_name))
+    });
     if heading.is_none() {
         heading = style.as_deref().and_then(heading_from_name);
     }
     let prov = build.provenance;
-    let element = if let Some(level) = heading {
+    let resolved_name = resolved
+        .as_ref()
+        .and_then(|resolved| resolved.name.as_deref());
+    let element = if resolved_name.is_some_and(is_title_name)
+        || style.as_deref().is_some_and(is_title_name)
+    {
+        DocumentElement::Title(Title {
+            content: build.content,
+            provenance: prov,
+        })
+    } else if resolved_name.is_some_and(is_subtitle_name)
+        || style.as_deref().is_some_and(is_subtitle_name)
+    {
+        DocumentElement::Subtitle(Subtitle {
+            content: build.content,
+            provenance: prov,
+        })
+    } else if let Some(level) = heading {
         DocumentElement::Heading(Heading {
             level,
+            content: build.content,
+            provenance: prov,
+        })
+    } else if resolved
+        .as_ref()
+        .and_then(|resolved| resolved.name.as_deref())
+        .is_some_and(is_quote_name)
+        || style.as_deref().is_some_and(is_quote_name)
+    {
+        DocumentElement::BlockQuote(BlockQuote {
             content: build.content,
             provenance: prov,
         })
@@ -1151,6 +1218,46 @@ fn heading_from_name(name: &str) -> Option<u8> {
                 })
                 .map(|v| v.clamp(1, 6))
         })
+}
+
+fn is_quote_name(name: &str) -> bool {
+    let normalized = normalize_style_name(name);
+    matches!(
+        normalized.as_str(),
+        "quote"
+            | "intense quote"
+            | "quotation"
+            | "intense quotation"
+            | "zitat"
+            | "intensives zitat"
+    )
+}
+
+fn normalize_style_name(name: &str) -> String {
+    name.replace("_20_", " ")
+        .replace(['_', '-'], " ")
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn is_title_name(name: &str) -> bool {
+    matches!(
+        normalize_style_name(name).as_str(),
+        "title" | "titel" | "titre" | "título" | "titolo"
+    )
+}
+
+fn is_subtitle_name(name: &str) -> bool {
+    matches!(
+        normalize_style_name(name).as_str(),
+        "subtitle" | "sub title" | "untertitel" | "sous titre" | "subtítulo" | "sottotitolo"
+    )
+}
+
+fn is_semantic_paragraph_style(name: &str) -> bool {
+    is_quote_name(name) || is_title_name(name) || is_subtitle_name(name)
 }
 
 fn group_lists(elements: Vec<DocumentElement>) -> Vec<DocumentElement> {
@@ -1527,7 +1634,7 @@ fn scan_odt_styles(data: &[u8], part: &str, styles: &mut HashMap<String, OdtStyl
     let mut style = OdtStyle::default();
     loop {
         match xml_event(&mut reader, &mut buf, part)? {
-            Event::Start(e) if local(e.name().as_ref()) == b"style" => {
+            Event::Start(e) if matches!(local(e.name().as_ref()), b"style" | b"list-style") => {
                 name = attr(&e, b"name");
                 style = OdtStyle {
                     parent: attr(&e, b"parent-style-name"),
@@ -1557,18 +1664,27 @@ fn scan_odt_styles(data: &[u8], part: &str, styles: &mut HashMap<String, OdtStyl
             Event::Start(e) | Event::Empty(e)
                 if name.is_some() && local(e.name().as_ref()) == b"list-level-style-number" =>
             {
-                style.marker = Some(match attr(&e, b"num-format").as_deref() {
+                let level = attr(&e, b"level")
+                    .and_then(|value| value.parse::<u8>().ok())
+                    .unwrap_or(1)
+                    .saturating_sub(1);
+                let marker = match attr(&e, b"num-format").as_deref() {
                     Some("a") => ListMarker::LowerLetter,
                     Some("A") => ListMarker::UpperLetter,
                     Some("i") => ListMarker::LowerRoman,
                     Some("I") => ListMarker::UpperRoman,
                     _ => ListMarker::Decimal,
-                });
+                };
+                style.markers.insert(level, marker);
             }
             Event::Start(e) | Event::Empty(e)
                 if name.is_some() && local(e.name().as_ref()) == b"list-level-style-bullet" =>
             {
-                style.marker = Some(ListMarker::Bullet);
+                let level = attr(&e, b"level")
+                    .and_then(|value| value.parse::<u8>().ok())
+                    .unwrap_or(1)
+                    .saturating_sub(1);
+                style.markers.insert(level, ListMarker::Bullet);
             }
             Event::End(e) if matches!(local(e.name().as_ref()), b"style" | b"list-style") => {
                 if let Some(name) = name.take() {
@@ -1605,6 +1721,43 @@ fn resolved_odt_style(styles: &HashMap<String, OdtStyle>, name: &str) -> TextFor
     visit(styles, name, &mut HashSet::new())
 }
 
+fn is_odt_style(
+    styles: &HashMap<String, OdtStyle>,
+    name: &str,
+    predicate: fn(&str) -> bool,
+) -> bool {
+    fn visit(
+        styles: &HashMap<String, OdtStyle>,
+        name: &str,
+        predicate: fn(&str) -> bool,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if !seen.insert(name.to_owned()) {
+            return false;
+        }
+        if predicate(name) {
+            return true;
+        }
+        styles
+            .get(name)
+            .and_then(|style| style.parent.as_deref())
+            .is_some_and(|parent| visit(styles, parent, predicate, seen))
+    }
+    visit(styles, name, predicate, &mut HashSet::new())
+}
+
+fn is_odt_quote_style(styles: &HashMap<String, OdtStyle>, name: &str) -> bool {
+    is_odt_style(styles, name, is_quote_name)
+}
+
+fn is_odt_title_style(styles: &HashMap<String, OdtStyle>, name: &str) -> bool {
+    is_odt_style(styles, name, is_title_name)
+}
+
+fn is_odt_subtitle_style(styles: &HashMap<String, OdtStyle>, name: &str) -> bool {
+    is_odt_style(styles, name, is_subtitle_name)
+}
+
 /// Parses an OpenDocument Text (ODT) file into a `Document` structure, extracting its main content, metadata, and optional features such as
 /// headers, footers, comments, footnotes, endnotes, and images.
 ///
@@ -1639,12 +1792,21 @@ fn resolved_odt_style(styles: &HashMap<String, OdtStyle>, name: &str) -> TextFor
 /// - `Err(MissingImage)`: Missing or inaccessible required parts for referenced images.
 /// - `Err(ImageConversion)`: Errors during image preparation (e.g., unsupported media type).
 fn parse_odt(bytes: &[u8], config: &ParserConfig) -> Result<Document> {
-    let elements = parse_odt_main(bytes, config)?;
+    let data = required_part(bytes, "content.xml")?;
+    let styles = parse_odt_styles(bytes, &data)?;
+    let parsed = parse_odt_content(&data, &styles, config)?;
     let mut referenced_images = HashSet::new();
-    collect_image_ids(&elements, &mut referenced_images);
+    collect_image_ids(&parsed.elements, &mut referenced_images);
+    let stories = parse_odt_master_pages(bytes, &styles, config)?;
     let mut document = Document {
-        elements,
+        elements: parsed.elements,
+        sections: stories.sections,
         metadata: parse_odt_metadata(bytes)?,
+        headers: stories.headers,
+        footers: stories.footers,
+        comments: parsed.comments,
+        footnotes: parsed.footnotes,
+        endnotes: parsed.endnotes,
         ..Document::default()
     };
     if config.extract_images {
@@ -1698,6 +1860,9 @@ fn collect_image_ids(elements: &[DocumentElement], out: &mut HashSet<String>) {
         match element {
             DocumentElement::Paragraph(value) => inline(&value.content, out),
             DocumentElement::Heading(value) => inline(&value.content, out),
+            DocumentElement::Title(value) => inline(&value.content, out),
+            DocumentElement::Subtitle(value) => inline(&value.content, out),
+            DocumentElement::BlockQuote(value) => inline(&value.content, out),
             DocumentElement::Image(value) => {
                 out.insert(value.resource_id.clone());
             }
@@ -1743,82 +1908,169 @@ fn collect_image_ids(elements: &[DocumentElement], out: &mut HashSet<String>) {
 /// | `text:span` | formatierter Text |
 /// | `text:line-break` | `Inline::LineBreak` |
 /// | `draw:image` | `Inline::Image` |
-fn parse_odt_main(bytes: &[u8], _config: &ParserConfig) -> Result<Vec<DocumentElement>> {
+fn parse_odt_main(bytes: &[u8], config: &ParserConfig) -> Result<Vec<DocumentElement>> {
     let data = required_part(bytes, "content.xml")?;
     let styles = parse_odt_styles(bytes, &data)?;
-    let mut reader = xml_reader(&data);
+    Ok(parse_odt_content(&data, &styles, config)?.elements)
+}
+
+fn parse_odt_content(
+    data: &[u8],
+    styles: &HashMap<String, OdtStyle>,
+    config: &ParserConfig,
+) -> Result<OdtParsed> {
+    let mut reader = xml_reader(data);
     let mut buf = Vec::new();
-    let mut out = Vec::new();
-    let mut sequence = 0;
+    let mut parsed = OdtParsed::default();
     loop {
         match xml_event(&mut reader, &mut buf, "content.xml")? {
             Event::Start(e) if matches!(local(e.name().as_ref()), b"p" | b"h") => {
-                let name = local(e.name().as_ref()).to_vec();
+                let tag = local(e.name().as_ref()).to_vec();
                 let level = attr(&e, b"outline-level")
-                    .and_then(|v| v.parse::<u8>().ok())
+                    .and_then(|value| value.parse::<u8>().ok())
                     .unwrap_or(1)
                     .clamp(1, 6);
-                let base_format = attr(&e, b"style-name")
-                    .as_deref()
-                    .map(|name| resolved_odt_style(&styles, name))
-                    .unwrap_or_default();
-                let content = parse_odt_inline(&mut reader, &name, &base_format, &styles)?;
-                let provenance = Provenance {
-                    source_part: "content.xml".into(),
-                    sequence,
-                    ..Provenance::default()
-                };
-                sequence += 1;
-                if name == b"h" {
-                    out.push(DocumentElement::Heading(Heading {
-                        level,
-                        content,
-                        provenance,
-                    }));
-                } else {
-                    out.push(DocumentElement::Paragraph(Paragraph {
-                        content,
-                        provenance,
-                    }));
-                }
+                let style_name = attr(&e, b"style-name");
+                let base_format = odt_base_format(styles, style_name.as_deref());
+                let content = parse_odt_inline(
+                    &mut reader,
+                    &tag,
+                    &base_format,
+                    styles,
+                    config,
+                    &mut parsed,
+                    "content.xml",
+                )?;
+                let provenance = odt_provenance(
+                    &mut parsed,
+                    StoryType::Main,
+                    style_name.clone(),
+                    "content.xml",
+                );
+                parsed.elements.push(odt_text_element(
+                    &tag,
+                    level,
+                    style_name.as_deref(),
+                    content,
+                    provenance,
+                    styles,
+                ));
             }
             Event::Start(e) if local(e.name().as_ref()) == b"list" => {
-                let marker = attr(&e, b"style-name")
-                    .as_deref()
-                    .and_then(|name| styles.get(name))
-                    .and_then(|style| style.marker)
-                    .unwrap_or(ListMarker::Bullet);
-                out.push(DocumentElement::List(parse_odt_list(
-                    &mut reader,
-                    0,
-                    &mut sequence,
-                    &styles,
-                    marker,
-                )?));
+                let style_name = attr(&e, b"style-name");
+                let list =
+                    parse_odt_list(&mut reader, 0, 0, style_name, styles, config, &mut parsed)?;
+                parsed.elements.push(DocumentElement::List(list));
             }
             Event::Start(e) if local(e.name().as_ref()) == b"table" => {
-                out.push(DocumentElement::Table(parse_odt_table(
-                    &mut reader,
-                    &mut sequence,
-                    &styles,
-                )?));
+                let table = parse_odt_table(&mut reader, styles, config, &mut parsed)?;
+                parsed.elements.push(DocumentElement::Table(table));
             }
             Event::Eof => break,
             _ => {}
         }
         buf.clear();
     }
-    Ok(out)
+    Ok(parsed)
+}
+
+fn odt_base_format(styles: &HashMap<String, OdtStyle>, style_name: Option<&str>) -> TextFormat {
+    if style_name.is_some_and(|name| {
+        is_odt_quote_style(styles, name)
+            || is_odt_title_style(styles, name)
+            || is_odt_subtitle_style(styles, name)
+    }) {
+        TextFormat::default()
+    } else {
+        style_name
+            .map(|name| resolved_odt_style(styles, name))
+            .unwrap_or_default()
+    }
+}
+
+fn odt_provenance(
+    parsed: &mut OdtParsed,
+    story: StoryType,
+    paragraph_style: Option<String>,
+    source_part: &str,
+) -> Provenance {
+    let provenance = Provenance {
+        source_part: source_part.into(),
+        story,
+        sequence: parsed.sequence,
+        paragraph_style,
+        ..Provenance::default()
+    };
+    parsed.sequence += 1;
+    provenance
+}
+
+fn odt_text_element(
+    tag: &[u8],
+    level: u8,
+    style_name: Option<&str>,
+    content: Vec<Inline>,
+    provenance: Provenance,
+    styles: &HashMap<String, OdtStyle>,
+) -> DocumentElement {
+    if style_name.is_some_and(|name| is_odt_title_style(styles, name)) {
+        DocumentElement::Title(Title {
+            content,
+            provenance,
+        })
+    } else if style_name.is_some_and(|name| is_odt_subtitle_style(styles, name)) {
+        DocumentElement::Subtitle(Subtitle {
+            content,
+            provenance,
+        })
+    } else if tag == b"h" {
+        DocumentElement::Heading(Heading {
+            level,
+            content,
+            provenance,
+        })
+    } else if style_name.is_some_and(|name| is_odt_quote_style(styles, name)) {
+        DocumentElement::BlockQuote(BlockQuote {
+            content,
+            provenance,
+        })
+    } else {
+        DocumentElement::Paragraph(Paragraph {
+            content,
+            provenance,
+        })
+    }
+}
+
+fn odt_list_marker(
+    styles: &HashMap<String, OdtStyle>,
+    style_name: Option<&str>,
+    level: u8,
+    fallback: ListMarker,
+) -> ListMarker {
+    style_name
+        .and_then(|name| styles.get(name))
+        .and_then(|style| style.markers.get(&level))
+        .copied()
+        .unwrap_or(fallback)
 }
 
 fn parse_odt_list(
     reader: &mut Reader<&[u8]>,
     level: u8,
-    sequence: &mut usize,
+    style_level: u8,
+    style_name: Option<String>,
     styles: &HashMap<String, OdtStyle>,
-    marker: ListMarker,
+    config: &ParserConfig,
+    parsed: &mut OdtParsed,
 ) -> Result<List> {
-    let list_sequence = *sequence;
+    let list_sequence = parsed.sequence;
+    let marker = odt_list_marker(
+        styles,
+        style_name.as_deref(),
+        style_level,
+        ListMarker::Bullet,
+    );
     let mut buf = Vec::new();
     let mut items = Vec::new();
     let mut blocks = Vec::new();
@@ -1832,47 +2084,53 @@ fn parse_odt_list(
                 children.clear();
             }
             Event::Start(e) if in_item && matches!(local(e.name().as_ref()), b"p" | b"h") => {
-                let name = local(e.name().as_ref()).to_vec();
+                let tag = local(e.name().as_ref()).to_vec();
                 let heading_level = attr(&e, b"outline-level")
                     .and_then(|v| v.parse::<u8>().ok())
                     .unwrap_or(1)
                     .clamp(1, 6);
-                let base_format = attr(&e, b"style-name")
-                    .as_deref()
-                    .map(|name| resolved_odt_style(styles, name))
-                    .unwrap_or_default();
-                let content = parse_odt_inline(reader, &name, &base_format, styles)?;
-                let provenance = Provenance {
-                    source_part: "content.xml".into(),
-                    sequence: *sequence,
-                    ..Provenance::default()
-                };
-                *sequence += 1;
-                if name == b"h" {
-                    blocks.push(DocumentElement::Heading(Heading {
-                        level: heading_level,
-                        content,
-                        provenance,
-                    }));
-                } else {
-                    blocks.push(DocumentElement::Paragraph(Paragraph {
-                        content,
-                        provenance,
-                    }));
-                }
+                let paragraph_style = attr(&e, b"style-name");
+                let base_format = odt_base_format(styles, paragraph_style.as_deref());
+                let content = parse_odt_inline(
+                    reader,
+                    &tag,
+                    &base_format,
+                    styles,
+                    config,
+                    parsed,
+                    "content.xml",
+                )?;
+                let provenance = odt_provenance(
+                    parsed,
+                    StoryType::Main,
+                    paragraph_style.clone(),
+                    "content.xml",
+                );
+                blocks.push(odt_text_element(
+                    &tag,
+                    heading_level,
+                    paragraph_style.as_deref(),
+                    content,
+                    provenance,
+                    styles,
+                ));
             }
             Event::Start(e) if in_item && local(e.name().as_ref()) == b"list" => {
-                let child_marker = attr(&e, b"style-name")
-                    .as_deref()
-                    .and_then(|name| styles.get(name))
-                    .and_then(|style| style.marker)
-                    .unwrap_or(marker);
+                let explicit_style = attr(&e, b"style-name");
+                let child_style_level = if explicit_style.is_some() {
+                    0
+                } else {
+                    style_level.saturating_add(1)
+                };
+                let child_style = explicit_style.or_else(|| style_name.clone());
                 children.push(parse_odt_list(
                     reader,
                     level.saturating_add(1),
-                    sequence,
+                    child_style_level,
+                    child_style,
                     styles,
-                    child_marker,
+                    config,
+                    parsed,
                 )?);
             }
             Event::End(e) if local(e.name().as_ref()) == b"list-item" => {
@@ -1903,10 +2161,11 @@ fn parse_odt_list(
 
 fn parse_odt_table(
     reader: &mut Reader<&[u8]>,
-    sequence: &mut usize,
     styles: &HashMap<String, OdtStyle>,
+    config: &ParserConfig,
+    parsed: &mut OdtParsed,
 ) -> Result<Table> {
-    let table_sequence = *sequence;
+    let table_sequence = parsed.sequence;
     let mut buf = Vec::new();
     let mut rows = Vec::new();
     let mut row = Vec::new();
@@ -1922,10 +2181,11 @@ fn parse_odt_table(
                     .unwrap_or(1);
                 row.push(parse_odt_cell(
                     reader,
-                    sequence,
                     row_span,
                     column_span,
                     styles,
+                    config,
+                    parsed,
                 )?);
             }
             Event::End(e) if local(e.name().as_ref()) == b"table-row" => {
@@ -1949,52 +2209,52 @@ fn parse_odt_table(
 
 fn parse_odt_cell(
     reader: &mut Reader<&[u8]>,
-    sequence: &mut usize,
     row_span: usize,
     column_span: usize,
     styles: &HashMap<String, OdtStyle>,
+    config: &ParserConfig,
+    parsed: &mut OdtParsed,
 ) -> Result<TableCell> {
     let mut buf = Vec::new();
     let mut blocks = Vec::new();
     loop {
         match xml_event(reader, &mut buf, "content.xml")? {
             Event::Start(e) if matches!(local(e.name().as_ref()), b"p" | b"h") => {
-                let name = local(e.name().as_ref()).to_vec();
+                let tag = local(e.name().as_ref()).to_vec();
                 let level = attr(&e, b"outline-level")
                     .and_then(|v| v.parse::<u8>().ok())
                     .unwrap_or(1)
                     .clamp(1, 6);
-                let base_format = attr(&e, b"style-name")
-                    .as_deref()
-                    .map(|name| resolved_odt_style(styles, name))
-                    .unwrap_or_default();
-                let content = parse_odt_inline(reader, &name, &base_format, styles)?;
-                let provenance = Provenance {
-                    source_part: "content.xml".into(),
-                    sequence: *sequence,
-                    ..Provenance::default()
-                };
-                *sequence += 1;
-                if name == b"h" {
-                    blocks.push(DocumentElement::Heading(Heading {
-                        level,
-                        content,
-                        provenance,
-                    }));
-                } else {
-                    blocks.push(DocumentElement::Paragraph(Paragraph {
-                        content,
-                        provenance,
-                    }));
-                }
+                let paragraph_style = attr(&e, b"style-name");
+                let base_format = odt_base_format(styles, paragraph_style.as_deref());
+                let content = parse_odt_inline(
+                    reader,
+                    &tag,
+                    &base_format,
+                    styles,
+                    config,
+                    parsed,
+                    "content.xml",
+                )?;
+                let provenance = odt_provenance(
+                    parsed,
+                    StoryType::Main,
+                    paragraph_style.clone(),
+                    "content.xml",
+                );
+                blocks.push(odt_text_element(
+                    &tag,
+                    level,
+                    paragraph_style.as_deref(),
+                    content,
+                    provenance,
+                    styles,
+                ));
             }
             Event::Start(e) if local(e.name().as_ref()) == b"list" => {
+                let style_name = attr(&e, b"style-name");
                 blocks.push(DocumentElement::List(parse_odt_list(
-                    reader,
-                    0,
-                    sequence,
-                    styles,
-                    ListMarker::Bullet,
+                    reader, 0, 0, style_name, styles, config, parsed,
                 )?));
             }
             Event::End(e) if local(e.name().as_ref()) == b"table-cell" => break,
@@ -2015,6 +2275,9 @@ fn parse_odt_inline(
     end: &[u8],
     base_format: &TextFormat,
     styles: &HashMap<String, OdtStyle>,
+    config: &ParserConfig,
+    parsed: &mut OdtParsed,
+    source_part: &str,
 ) -> Result<Vec<Inline>> {
     let mut buf = Vec::new();
     let mut out = Vec::new();
@@ -2034,6 +2297,47 @@ fn parse_odt_inline(
                 if let Some(name) = attr(&e, b"style-name") {
                     merge_format(&mut format, &resolved_odt_style(styles, &name));
                     format.character_style = Some(name);
+                }
+            }
+            Event::Start(e) if local(e.name().as_ref()) == b"annotation" => {
+                flush_odt_text(&mut text, &format, &mut out, &mut hyperlink);
+                if config.include_comments {
+                    let id = (parsed.comments.len() + 1).to_string();
+                    let comment = parse_odt_annotation(
+                        reader,
+                        id.clone(),
+                        styles,
+                        config,
+                        parsed,
+                        source_part,
+                    )?;
+                    push_inline(Inline::CommentReference(id), &mut out, &mut hyperlink);
+                    parsed.comments.push(comment);
+                } else {
+                    skip_xml_element(reader, b"annotation", source_part)?;
+                }
+            }
+            Event::Start(e) if local(e.name().as_ref()) == b"note" => {
+                flush_odt_text(&mut text, &format, &mut out, &mut hyperlink);
+                let class = attr(&e, b"note-class").unwrap_or_else(|| "footnote".into());
+                let enabled = if class == "endnote" {
+                    config.include_endnotes
+                } else {
+                    config.include_footnotes
+                };
+                if enabled {
+                    let note = parse_odt_note(reader, &class, styles, config, parsed, source_part)?;
+                    let id = note.id.clone();
+                    let reference = if class == "endnote" {
+                        parsed.endnotes.push(note);
+                        Inline::EndnoteReference(id)
+                    } else {
+                        parsed.footnotes.push(note);
+                        Inline::FootnoteReference(id)
+                    };
+                    push_inline(reference, &mut out, &mut hyperlink);
+                } else {
+                    skip_xml_element(reader, b"note", source_part)?;
                 }
             }
             Event::Text(e) => {
@@ -2098,6 +2402,320 @@ fn parse_odt_inline(
     }
     flush_odt_text(&mut text, &format, &mut out, &mut hyperlink);
     Ok(out)
+}
+
+fn parse_odt_annotation(
+    reader: &mut Reader<&[u8]>,
+    id: String,
+    styles: &HashMap<String, OdtStyle>,
+    config: &ParserConfig,
+    parsed: &mut OdtParsed,
+    source_part: &str,
+) -> Result<Annotation> {
+    let mut buf = Vec::new();
+    let mut author = None;
+    let mut date = None;
+    let mut capture = None;
+    let mut elements = Vec::new();
+    loop {
+        match xml_event(reader, &mut buf, source_part)? {
+            Event::Start(e) if matches!(local(e.name().as_ref()), b"creator" | b"date") => {
+                capture = Some(local(e.name().as_ref()).to_vec());
+            }
+            Event::Start(e) if local(e.name().as_ref()) == b"p" => {
+                let style_name = attr(&e, b"style-name");
+                let base_format = odt_base_format(styles, style_name.as_deref());
+                let content = parse_odt_inline(
+                    reader,
+                    b"p",
+                    &base_format,
+                    styles,
+                    config,
+                    parsed,
+                    source_part,
+                )?;
+                let provenance =
+                    odt_provenance(parsed, StoryType::Comment, style_name, source_part);
+                elements.push(DocumentElement::Paragraph(Paragraph {
+                    content,
+                    provenance,
+                }));
+            }
+            Event::Text(e) if capture.is_some() => {
+                let value = decode_xml_text(&e, source_part)?;
+                match capture.as_deref() {
+                    Some(b"creator") => author = Some(value),
+                    Some(b"date") => date = Some(value),
+                    _ => {}
+                }
+            }
+            Event::End(e) if matches!(local(e.name().as_ref()), b"creator" | b"date") => {
+                capture = None
+            }
+            Event::End(e) if local(e.name().as_ref()) == b"annotation" => break,
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(Annotation {
+        id,
+        author,
+        date,
+        elements,
+    })
+}
+
+fn parse_odt_note(
+    reader: &mut Reader<&[u8]>,
+    class: &str,
+    styles: &HashMap<String, OdtStyle>,
+    config: &ParserConfig,
+    parsed: &mut OdtParsed,
+    source_part: &str,
+) -> Result<Annotation> {
+    let mut buf = Vec::new();
+    let mut citation = String::new();
+    let mut in_citation = false;
+    let mut in_body = false;
+    let mut elements = Vec::new();
+    loop {
+        match xml_event(reader, &mut buf, source_part)? {
+            Event::Start(e) if local(e.name().as_ref()) == b"note-citation" => in_citation = true,
+            Event::Start(e) if local(e.name().as_ref()) == b"note-body" => in_body = true,
+            Event::Start(e) if in_body && local(e.name().as_ref()) == b"p" => {
+                let style_name = attr(&e, b"style-name");
+                let base_format = odt_base_format(styles, style_name.as_deref());
+                let content = parse_odt_inline(
+                    reader,
+                    b"p",
+                    &base_format,
+                    styles,
+                    config,
+                    parsed,
+                    source_part,
+                )?;
+                let story = if class == "endnote" {
+                    StoryType::Endnote
+                } else {
+                    StoryType::Footnote
+                };
+                let provenance = odt_provenance(parsed, story, style_name, source_part);
+                elements.push(DocumentElement::Paragraph(Paragraph {
+                    content,
+                    provenance,
+                }));
+            }
+            Event::Text(e) if in_citation => citation.push_str(&decode_xml_text(&e, source_part)?),
+            Event::End(e) if local(e.name().as_ref()) == b"note-citation" => in_citation = false,
+            Event::End(e) if local(e.name().as_ref()) == b"note-body" => in_body = false,
+            Event::End(e) if local(e.name().as_ref()) == b"note" => break,
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    let fallback = if class == "endnote" {
+        parsed.endnotes.len() + 1
+    } else {
+        parsed.footnotes.len() + 1
+    };
+    let id = if citation.trim().is_empty() {
+        fallback.to_string()
+    } else {
+        citation.trim().to_owned()
+    };
+    Ok(Annotation {
+        id,
+        author: None,
+        date: None,
+        elements,
+    })
+}
+
+fn skip_xml_element(reader: &mut Reader<&[u8]>, end: &[u8], part: &str) -> Result<()> {
+    let mut buf = Vec::new();
+    let mut depth = 1usize;
+    while depth > 0 {
+        match xml_event(reader, &mut buf, part)? {
+            Event::Start(_) => depth += 1,
+            Event::End(e) => {
+                depth -= 1;
+                if depth == 0 && local(e.name().as_ref()) == end {
+                    break;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(())
+}
+
+fn decode_xml_text(event: &quick_xml::events::BytesText<'_>, part: &str) -> Result<String> {
+    let decoded = event
+        .decode()
+        .map_err(|error| Error::Conversion(format!("text decoding failed in {part}: {error}")))?;
+    Ok(quick_xml::escape::unescape(&decoded)
+        .map(Cow::into_owned)
+        .unwrap_or_else(|_| decoded.into_owned()))
+}
+
+fn parse_odt_master_pages(
+    bytes: &[u8],
+    styles: &HashMap<String, OdtStyle>,
+    config: &ParserConfig,
+) -> Result<OdtStories> {
+    if !config.include_headers_footers {
+        return Ok(OdtStories::default());
+    }
+    let Some(data) = read_part(bytes, "styles.xml")? else {
+        return Ok(OdtStories::default());
+    };
+    let mut reader = xml_reader(&data);
+    let mut buf = Vec::new();
+    let mut current_name = None;
+    let mut current_header = Vec::new();
+    let mut current_footer = Vec::new();
+    let mut pages = Vec::new();
+    let mut parsed = OdtParsed::default();
+    loop {
+        match xml_event(&mut reader, &mut buf, "styles.xml")? {
+            Event::Start(e) if local(e.name().as_ref()) == b"master-page" => {
+                current_name = attr(&e, b"name");
+                current_header.clear();
+                current_footer.clear();
+            }
+            Event::Start(e) if current_name.is_some() && local(e.name().as_ref()) == b"header" => {
+                current_header = parse_odt_story_container(
+                    &mut reader,
+                    b"header",
+                    StoryType::Header,
+                    styles,
+                    config,
+                    &mut parsed,
+                )?;
+            }
+            Event::Start(e) if current_name.is_some() && local(e.name().as_ref()) == b"footer" => {
+                current_footer = parse_odt_story_container(
+                    &mut reader,
+                    b"footer",
+                    StoryType::Footer,
+                    styles,
+                    config,
+                    &mut parsed,
+                )?;
+            }
+            Event::End(e) if local(e.name().as_ref()) == b"master-page" => {
+                if let Some(name) = current_name.take()
+                    && (!current_header.is_empty() || !current_footer.is_empty())
+                {
+                    pages.push((
+                        name,
+                        std::mem::take(&mut current_header),
+                        std::mem::take(&mut current_footer),
+                    ));
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    let selected = pages
+        .iter()
+        .position(|(name, _, _)| name == "Standard")
+        .or_else(|| (!pages.is_empty()).then_some(0));
+    let Some(index) = selected else {
+        return Ok(OdtStories::default());
+    };
+    let (name, header_elements, footer_elements) = pages.swap_remove(index);
+    let header_id = format!("styles.xml#{name}/header");
+    let footer_id = format!("styles.xml#{name}/footer");
+    let mut headers = BTreeMap::new();
+    let mut footers = BTreeMap::new();
+    let mut header_references = Vec::new();
+    let mut footer_references = Vec::new();
+    if !header_elements.is_empty() {
+        header_references.push(header_id.clone());
+        headers.insert(
+            header_id,
+            Story {
+                kind: Some(HeaderFooterKind::Default),
+                used_by_sections: vec![0],
+                elements: header_elements,
+            },
+        );
+    }
+    if !footer_elements.is_empty() {
+        footer_references.push(footer_id.clone());
+        footers.insert(
+            footer_id,
+            Story {
+                kind: Some(HeaderFooterKind::Default),
+                used_by_sections: vec![0],
+                elements: footer_elements,
+            },
+        );
+    }
+    Ok(OdtStories {
+        sections: vec![Section {
+            index: 0,
+            header_references,
+            footer_references,
+        }],
+        headers,
+        footers,
+    })
+}
+
+fn parse_odt_story_container(
+    reader: &mut Reader<&[u8]>,
+    end: &[u8],
+    story: StoryType,
+    styles: &HashMap<String, OdtStyle>,
+    config: &ParserConfig,
+    parsed: &mut OdtParsed,
+) -> Result<Vec<DocumentElement>> {
+    let mut buf = Vec::new();
+    let mut elements = Vec::new();
+    loop {
+        match xml_event(reader, &mut buf, "styles.xml")? {
+            Event::Start(e) if matches!(local(e.name().as_ref()), b"p" | b"h") => {
+                let tag = local(e.name().as_ref()).to_vec();
+                let level = attr(&e, b"outline-level")
+                    .and_then(|value| value.parse::<u8>().ok())
+                    .unwrap_or(1)
+                    .clamp(1, 6);
+                let style_name = attr(&e, b"style-name");
+                let base_format = odt_base_format(styles, style_name.as_deref());
+                let content = parse_odt_inline(
+                    reader,
+                    &tag,
+                    &base_format,
+                    styles,
+                    config,
+                    parsed,
+                    "styles.xml",
+                )?;
+                let provenance = odt_provenance(parsed, story, style_name.clone(), "styles.xml");
+                elements.push(odt_text_element(
+                    &tag,
+                    level,
+                    style_name.as_deref(),
+                    content,
+                    provenance,
+                    styles,
+                ));
+            }
+            Event::End(e) if local(e.name().as_ref()) == end => break,
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(elements)
 }
 
 fn flush_odt_text(
