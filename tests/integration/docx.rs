@@ -2,6 +2,7 @@ use docx_to_md::{
     Document, DocumentContainer, DocumentElement, DocumentFormat, Inline, ListItem, ListMarker,
     ParserConfig, TextFormat, VerticalAlign,
 };
+use std::fs;
 use std::path::PathBuf;
 
 fn fixture_path() -> PathBuf {
@@ -11,6 +12,17 @@ fn fixture_path() -> PathBuf {
         .join("integration")
         .join("docx")
         .join("fixture.docx")
+}
+
+fn expected(name: &str) -> String {
+    fs::read_to_string(fixture_path().parent().unwrap().join(name)).expect("read DOCX golden")
+}
+
+fn image_fixture() -> Vec<u8> {
+    fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unit/media/example.jpg"),
+    )
+    .expect("read image fixture")
 }
 
 fn config() -> ParserConfig {
@@ -43,6 +55,9 @@ fn element_text(element: &DocumentElement) -> String {
     match element {
         DocumentElement::Paragraph(paragraph) => inline_text(&paragraph.content),
         DocumentElement::Heading(heading) => inline_text(&heading.content),
+        DocumentElement::Title(title) => inline_text(&title.content),
+        DocumentElement::Subtitle(subtitle) => inline_text(&subtitle.content),
+        DocumentElement::BlockQuote(quote) => inline_text(&quote.content),
         DocumentElement::List(list) => list
             .items
             .iter()
@@ -59,6 +74,24 @@ fn element_text(element: &DocumentElement) -> String {
             .join(" "),
         _ => String::new(),
     }
+}
+
+fn render_section(elements: Vec<DocumentElement>) -> String {
+    Document {
+        elements,
+        ..Document::default()
+    }
+    .to_markdown(
+        &ParserConfig::builder()
+            .extract_images(false)
+            .include_document_metadata(false)
+            .include_headers_footers(false)
+            .include_footnotes(false)
+            .include_endnotes(false)
+            .include_comments(false)
+            .build(),
+    )
+    .unwrap()
 }
 
 fn list_item_text(item: &ListItem) -> String {
@@ -189,6 +222,30 @@ fn parses_inline_formatting_hyperlinks_and_breaks() {
 }
 
 #[test]
+fn parses_title_and_subtitle_as_semantic_blocks() {
+    let (_, document) = parse_fixture();
+    let elements = document
+        .elements
+        .iter()
+        .filter(|element| {
+            matches!(
+                element,
+                DocumentElement::Title(_) | DocumentElement::Subtitle(_)
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    assert!(
+        matches!(&elements[0], DocumentElement::Title(title) if inline_text(&title.content) == "Titel")
+    );
+    assert!(
+        matches!(&elements[1], DocumentElement::Subtitle(subtitle) if inline_text(&subtitle.content) == "Subtitle")
+    );
+    assert_eq!(render_section(elements), expected("title_subtitle.md"));
+}
+
+#[test]
 fn parses_nested_bullet_and_numbered_lists() {
     let (_, document) = parse_fixture();
     let lists = document
@@ -214,6 +271,31 @@ fn parses_nested_bullet_and_numbered_lists() {
                 .is_some_and(|child| child.marker == ListMarker::LowerLetter)
             && list_item_text(&list.items[1]).contains("nested nested number")
     }));
+    assert_eq!(
+        render_section(
+            document
+                .elements
+                .iter()
+                .filter(|element| matches!(element, DocumentElement::List(_)))
+                .cloned()
+                .collect(),
+        ),
+        expected("lists.md")
+    );
+}
+
+#[test]
+fn renders_quote_styles_as_exact_blockquotes() {
+    let (_, document) = parse_fixture();
+    let quotes = document
+        .elements
+        .iter()
+        .filter(|element| matches!(element, DocumentElement::BlockQuote(_)))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    assert_eq!(quotes.len(), 2);
+    assert_eq!(render_section(quotes), expected("quotes.md"));
 }
 
 #[test]
@@ -268,6 +350,28 @@ fn parses_docx_stories_sections_and_annotations() {
     assert!(markdown.contains("[^fn-1]"));
     assert!(markdown.contains("[^en-1]"));
     assert!(markdown.contains("> **Comments**"));
+    assert!(!markdown.contains("MERGEFORMAT"));
+    assert!(!markdown.contains("_Sections:"));
+    let supplementary = &markdown[markdown.find("[^fn-1]:").expect("footnote definition")..];
+    assert_eq!(supplementary, expected("supplementary.md"));
+}
+
+#[test]
+fn extracts_and_embeds_docx_image_from_non_empty_blip() {
+    let (_, document) = parse_fixture();
+    let resource = document.images.values().next().expect("DOCX image");
+
+    assert_eq!(document.images.len(), 1);
+    assert_eq!(resource.data, image_fixture());
+    assert_eq!(resource.media_type, "image/jpeg");
+    assert_eq!(
+        document
+            .to_markdown(&config())
+            .unwrap()
+            .matches("data:image/jpeg;base64,")
+            .count(),
+        1
+    );
 }
 
 #[test]
