@@ -50,46 +50,6 @@ pub(crate) fn render(document: &Document, config: &ParserConfig) -> Result<Strin
         0,
         MarkdownContext::Flow,
     )?;
-    if config.include_headers_footers
-        && (!document.headers.is_empty() || !document.footers.is_empty())
-    {
-        out.push_str("\n## Headers and Footers\n\n");
-        for (id, story) in document.headers.iter().chain(&document.footers) {
-            let label = if document.headers.contains_key(id) {
-                "Header"
-            } else {
-                "Footer"
-            };
-            let kind = story.kind.map_or("default", |kind| match kind {
-                HeaderFooterKind::First => "first",
-                HeaderFooterKind::Even => "even",
-                HeaderFooterKind::Default => "default",
-            });
-            writeln!(out, "### {label} ({kind})").expect("writing String cannot fail");
-            if !story.used_by_sections.is_empty() {
-                writeln!(
-                    out,
-                    "\n_Sections: {}_",
-                    story
-                        .used_by_sections
-                        .iter()
-                        .map(usize::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-                .expect("writing String cannot fail");
-            }
-            out.push('\n');
-            render_elements(
-                &story.elements,
-                document,
-                config,
-                &mut out,
-                0,
-                MarkdownContext::Flow,
-            )?;
-        }
-    }
     if config.include_footnotes {
         render_notes(&document.footnotes, "fn", document, config, &mut out)?;
     }
@@ -97,7 +57,8 @@ pub(crate) fn render(document: &Document, config: &ParserConfig) -> Result<Strin
         render_notes(&document.endnotes, "en", document, config, &mut out)?;
     }
     if config.include_comments && !document.comments.is_empty() {
-        out.push_str("\n> **Comments**\n>\n");
+        begin_block(&mut out);
+        out.push_str("> **Comments**\n>\n");
         for comment in &document.comments {
             let mut body = String::new();
             render_elements(
@@ -119,7 +80,45 @@ pub(crate) fn render(document: &Document, config: &ParserConfig) -> Result<Strin
             .expect("writing String cannot fail");
         }
     }
+    if config.include_headers_footers
+        && (!document.headers.is_empty() || !document.footers.is_empty())
+    {
+        begin_block(&mut out);
+        out.push_str("## Headers and Footers\n");
+        for (id, story) in document.headers.iter().chain(&document.footers) {
+            begin_block(&mut out);
+            let label = if document.headers.contains_key(id) {
+                "Header"
+            } else {
+                "Footer"
+            };
+            let kind = story.kind.map_or("default", |kind| match kind {
+                HeaderFooterKind::First => "first",
+                HeaderFooterKind::Even => "even",
+                HeaderFooterKind::Default => "default",
+            });
+            writeln!(out, "### {label} ({kind})").expect("writing String cannot fail");
+            out.push('\n');
+            render_elements(
+                &story.elements,
+                document,
+                config,
+                &mut out,
+                0,
+                MarkdownContext::Flow,
+            )?;
+        }
+    }
     Ok(out.trim_end().to_owned() + "\n")
+}
+
+fn begin_block(out: &mut String) {
+    while out.ends_with('\n') {
+        out.pop();
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
 }
 
 fn render_metadata(metadata: &Metadata, out: &mut String) {
@@ -169,6 +168,9 @@ fn render_elements(
     for element in elements {
         match element {
             DocumentElement::Paragraph(paragraph) => {
+                if paragraph.content.is_empty() {
+                    continue;
+                }
                 out.push_str(&" ".repeat(indent));
                 render_inline(&paragraph.content, document, config, out, context)?;
                 out.push_str("\n\n");
@@ -185,7 +187,46 @@ fn render_elements(
                 )?;
                 out.push_str("\n\n");
             }
-            DocumentElement::List(list) => render_list(list, document, config, out, indent)?,
+            DocumentElement::Title(title) => {
+                out.push_str("# ");
+                render_inline(&title.content, document, config, out, MarkdownContext::Flow)?;
+                out.push_str("\n\n");
+            }
+            DocumentElement::Subtitle(subtitle) => {
+                out.push_str("## ");
+                render_inline(
+                    &subtitle.content,
+                    document,
+                    config,
+                    out,
+                    MarkdownContext::Flow,
+                )?;
+                out.push_str("\n\n");
+            }
+            DocumentElement::BlockQuote(quote) => {
+                let mut body = String::new();
+                render_inline(
+                    &quote.content,
+                    document,
+                    config,
+                    &mut body,
+                    MarkdownContext::Quote,
+                )?;
+                for line in body.trim_end_matches('\n').lines() {
+                    out.push_str(&" ".repeat(indent));
+                    out.push('>');
+                    if !line.is_empty() {
+                        out.push(' ');
+                        out.push_str(line);
+                    }
+                    out.push('\n');
+                }
+                out.push('\n');
+            }
+            DocumentElement::List(list) => {
+                render_list(list, document, config, out, indent)?;
+                out.push('\n');
+            }
             DocumentElement::Table(table) => render_table(table, document, config, out)?,
             DocumentElement::Image(image) => {
                 render_image(&image.resource_id, &image.alt, document, config, out)?;
@@ -295,6 +336,7 @@ fn render_list(
             ListMarker::Bullet => "- ".into(),
             _ => format!("{}. ", list.start as usize + offset),
         };
+        let marker_width = marker.chars().count();
         out.push_str(&marker);
         let mut rendered = String::new();
         render_elements(
@@ -306,13 +348,12 @@ fn render_list(
             MarkdownContext::ListItem,
         )?;
         let rendered = rendered.trim();
-        out.push_str(&rendered.replace('\n', &format!("\n{}  ", " ".repeat(indent))));
+        out.push_str(&rendered.replace('\n', &format!("\n{}", " ".repeat(indent + marker_width))));
         out.push('\n');
         for child in &item.children {
-            render_list(child, document, config, out, indent + 2)?;
+            render_list(child, document, config, out, indent + marker_width)?;
         }
     }
-    out.push('\n');
     Ok(())
 }
 
@@ -419,7 +460,6 @@ fn render_notes(
     if notes.is_empty() {
         return Ok(());
     }
-    out.push('\n');
     for note in notes {
         let mut body = String::new();
         render_elements(
@@ -431,6 +471,7 @@ fn render_notes(
             MarkdownContext::Flow,
         )?;
         let body = body.trim().replace('\n', "\n    ");
+        begin_block(out);
         writeln!(out, "[^{prefix}-{}]: {body}", escape_id(&note.id))
             .expect("writing String cannot fail");
     }
