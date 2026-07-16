@@ -1,7 +1,9 @@
 [![Crates.io](https://img.shields.io/crates/v/docx-to-md.svg)](https://crates.io/crates/docx-to-md)
 [![tests](https://github.com/nilskruthoff/docx-parser/actions/workflows/ci.yml/badge.svg)](https://github.com/nilskruthoff/docx-parser/actions/workflows/ci.yml)
-[![Documentation](https://docs.rs/docx-to-md/badge.svg)](https://docs.rs/docx-to-md)
+[![codecov](https://codecov.io/gh/nilskruthoff/docx-parser/branch/main/graph/badge.svg)](https://codecov.io/gh/nilskruthoff/docx-parser)
 ![License](https://img.shields.io/crates/l/docx-to-md.svg)
+[![dependency status](https://deps.rs/repo/github/nilskruthoff/docx-parser/status.svg)](https://deps.rs/repo/github/nilskruthoff/docx-parser)
+[![Documentation](https://docs.rs/docx-to-md/badge.svg)](https://docs.rs/docx-to-md)
 
 # docx-to-md
 
