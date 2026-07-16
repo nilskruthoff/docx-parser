@@ -188,7 +188,15 @@ fn parses_docx_table_cells_spans_and_empty_content() {
 
 #[test]
 fn parsed_docx_fragments_match_markdown_fixtures() {
-    for (xml, markdown) in [("list.xml", "list.md"), ("table.xml", "table.md")] {
+    for (xml, markdown) in [
+        ("simple_table.xml", "simple_table.md"),
+        ("table.xml", "table.md"),
+        ("list.xml", "list.md"),
+        ("ordered_list.xml", "ordered_list.md"),
+        ("quotes.xml", "quotes.md"),
+        ("title_subtitle.xml", "title_subtitle.md"),
+        ("field.xml", "field.md"),
+    ] {
         let document = Document {
             elements: parse_docx_fixture(xml),
             ..Document::default()
@@ -203,6 +211,27 @@ fn parsed_docx_fragments_match_markdown_fixtures() {
 }
 
 #[test]
+fn parses_non_empty_blip_as_an_image_reference() {
+    let mut state = ParseState::default();
+    let elements = parse_docx_story(
+        &fixture("xml", "image_start.xml"),
+        "word/document.xml",
+        StoryType::Main,
+        &docx_indexes(),
+        &mut state,
+        &ParserConfig::default(),
+    )
+    .unwrap();
+
+    assert!(matches!(
+        &elements[0],
+        DocumentElement::Paragraph(paragraph)
+            if matches!(&paragraph.content[0], Inline::Image { resource_id, .. } if resource_id == "word/media/example.jpg")
+    ));
+    assert!(state.image_parts.contains_key("word/media/example.jpg"));
+}
+
+#[test]
 fn parses_odt_styles_structure_and_image_reference() {
     let bytes = odt_package();
     let elements = parse_odt_main(&bytes, &ParserConfig::default()).unwrap();
@@ -211,7 +240,15 @@ fn parses_odt_styles_structure_and_image_reference() {
         &elements[0],
         DocumentElement::Heading(heading) if heading.level == 2 && inline_text(&heading.content) == "ODT Heading"
     ));
-    let DocumentElement::Paragraph(paragraph) = &elements[1] else {
+    assert!(matches!(
+        &elements[1],
+        DocumentElement::Title(title) if inline_text(&title.content) == "ODT title"
+    ));
+    assert!(matches!(
+        &elements[2],
+        DocumentElement::Subtitle(subtitle) if inline_text(&subtitle.content) == "ODT subtitle"
+    ));
+    let DocumentElement::Paragraph(paragraph) = &elements[3] else {
         panic!("expected ODT paragraph");
     };
     assert_eq!(inline_text(&paragraph.content), "Before strong\nlink");
@@ -219,12 +256,15 @@ fn parses_odt_styles_structure_and_image_reference() {
         panic!("expected styled ODT span");
     };
     assert!(format.bold && format.italic);
-    assert!(
-        matches!(&elements[2], DocumentElement::List(list) if !list.items[0].children.is_empty())
-    );
-    assert!(matches!(&elements[3], DocumentElement::Table(table) if table.rows.len() == 2));
     assert!(matches!(
         &elements[4],
+        DocumentElement::List(list)
+            if list.marker == ListMarker::Bullet
+                && list.items[0].children[0].marker == ListMarker::Decimal
+    ));
+    assert!(matches!(&elements[5], DocumentElement::Table(table) if table.rows.len() == 2));
+    assert!(matches!(
+        &elements[6],
         DocumentElement::Paragraph(paragraph)
             if matches!(&paragraph.content[0], Inline::Image { resource_id, .. } if resource_id == "Pictures/example.jpg")
     ));
@@ -242,6 +282,36 @@ fn odt_parser_loads_referenced_image_bytes() {
         document.images["Pictures/example.jpg"].data,
         fixture("media", "example.jpg")
     );
+}
+
+#[test]
+fn parses_odt_notes_comments_quotes_and_master_page_stories() {
+    let config = ParserConfig::builder()
+        .compress_images(false)
+        .include_comments(true)
+        .build();
+    let document = parse_odt(&odt_package(), &config).unwrap();
+
+    assert_eq!(document.footnotes.len(), 1);
+    assert_eq!(document.endnotes.len(), 1);
+    assert_eq!(document.comments.len(), 1);
+    assert_eq!(document.comments[0].author.as_deref(), Some("Ada"));
+    assert_eq!(document.comments[0].date.as_deref(), Some("2026-07-16"));
+    assert_eq!(document.headers.len(), 1);
+    assert_eq!(document.footers.len(), 1);
+    assert!(document
+        .elements
+        .iter()
+        .any(|element| matches!(element, DocumentElement::BlockQuote(quote) if inline_text(&quote.content) == "A quote")));
+    assert!(document.elements.iter().any(|element| matches!(
+        element,
+        DocumentElement::Heading(heading) if inline_text(&heading.content) == "Page Title"
+    )));
+
+    let markdown = document.to_markdown(&config).unwrap();
+    let supplementary = &markdown[markdown.find("[^fn-1]:").unwrap()..];
+    let expected = fs::read_to_string(fixture_path("markdown", "odt_supplementary.md")).unwrap();
+    assert_eq!(supplementary, expected);
 }
 
 #[test]
