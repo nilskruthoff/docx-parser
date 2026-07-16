@@ -17,10 +17,10 @@ objects, content controls, or page layout.
 
 - **DOCX and ODT support:** Detects and reads Microsoft Word `.docx` and OpenDocument Text `.odt` packages.
 - **Markdown and structured output:** Renders documents to Markdown and exposes a reusable document model for custom processing.
-- **Document blocks:** Parses paragraphs, headings, nested ordered and unordered lists, and tables.
+- **Document blocks:** Parses titles, subtitles, paragraphs, headings, block quotes, nested ordered and unordered lists, and tables.
 - **Inline content and formatting:** Preserves text, hyperlinks, line breaks, bold, italic, underline, strikethrough, superscript, and subscript where supported by the source format.
 - **Images:** Loads referenced image resources and can embed them as base64 `data:` URLs, retain them for custom handling, or save and link them with absolute `file:` URLs.
-- **DOCX annotations and stories:** Optionally includes headers, footers, comments, footnotes, endnotes, and section associations.
+- **Annotations and stories:** Optionally includes DOCX and ODT headers, footers, comments, footnotes, endnotes, and section associations.
 - **Metadata and provenance:** Provides common document metadata as well as source-part, story, section, and style information for parsed elements.
 ---
 
