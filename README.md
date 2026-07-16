@@ -7,7 +7,7 @@
 
 # docx-to-md
 
-`docx-to-md` is a Rust 2024 library that reads DOCX and ODT packages with a namespace-tolerant pull parser. It exposes a structured
+`docx-to-md` reads DOCX and ODT packages with a namespace-tolerant pull parser. It exposes a structured
 document model and renders that model to Markdown.
 
 The parser does not evaluate fields, macros, track changes, charts, embedded
