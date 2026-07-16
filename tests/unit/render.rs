@@ -255,3 +255,62 @@ fn save_mode_requires_an_output_directory() {
 
     assert!(matches!(result, Err(Error::InvalidOutputPath(_))));
 }
+
+#[test]
+fn supplementary_blocks_match_exact_markdown_contract() {
+    let annotation = |id: &str, story, body: &str, author| Annotation {
+        id: id.into(),
+        author,
+        date: None,
+        elements: vec![DocumentElement::Paragraph(Paragraph {
+            content: vec![text(body, TextFormat::default())],
+            provenance: Provenance {
+                story,
+                ..Provenance::default()
+            },
+        })],
+    };
+    let story = |body: &str, story| Story {
+        kind: Some(HeaderFooterKind::Default),
+        used_by_sections: vec![0],
+        elements: vec![DocumentElement::Paragraph(Paragraph {
+            content: vec![text(body, TextFormat::default())],
+            provenance: Provenance {
+                story,
+                ..Provenance::default()
+            },
+        })],
+    };
+    let document = Document {
+        elements: vec![DocumentElement::Paragraph(Paragraph {
+            content: vec![
+                text("Body", TextFormat::default()),
+                Inline::FootnoteReference("1".into()),
+                Inline::EndnoteReference("i".into()),
+                Inline::CommentReference("1".into()),
+            ],
+            provenance: Provenance::default(),
+        })],
+        footnotes: vec![annotation("1", StoryType::Footnote, "Footnote", None)],
+        endnotes: vec![annotation("i", StoryType::Endnote, "Endnote", None)],
+        comments: vec![annotation(
+            "1",
+            StoryType::Comment,
+            "Comment",
+            Some("Ada".into()),
+        )],
+        headers: BTreeMap::from([("header".into(), story("Header", StoryType::Header))]),
+        footers: BTreeMap::from([(
+            "footer".into(),
+            story("Footer on Page 2", StoryType::Footer),
+        )]),
+        ..Document::default()
+    };
+    let config = ParserConfig::builder()
+        .include_document_metadata(false)
+        .include_comments(true)
+        .build();
+    let expected = fs::read_to_string(fixture_path("markdown", "supplementary.md")).unwrap();
+
+    assert_eq!(document.to_markdown(&config).unwrap(), expected);
+}
