@@ -249,3 +249,7 @@ pub(crate) fn list_parts(bytes: &[u8]) -> Result<Vec<String>> {
 
 #[allow(dead_code)]
 fn _assert_file_send(_: File) {}
+
+#[cfg(test)]
+#[path = "../tests/unit/package.rs"]
+mod tests;

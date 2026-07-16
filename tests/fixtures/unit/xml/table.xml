@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="urn:word">
+  <w:body>
+    <w:tbl>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>left | right</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p/></w:tc>
+        <w:tc><w:p><w:r><w:t>next</w:t><w:br/><w:t>line</w:t></w:r></w:p></w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>

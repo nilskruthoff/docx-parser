@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:numbering xmlns:w="urn:word">
+  <w:abstractNum w:abstractNumId="10">
+    <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/></w:lvl>
+    <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="bullet"/></w:lvl>
+  </w:abstractNum>
+  <w:abstractNum w:abstractNumId="20">
+    <w:lvl w:ilvl="0"><w:start w:val="3"/><w:numFmt w:val="decimal"/></w:lvl>
+    <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/></w:lvl>
+    <w:lvl w:ilvl="2"><w:start w:val="1"/><w:numFmt w:val="lowerRoman"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="10"/></w:num>
+  <w:num w:numId="2">
+    <w:abstractNumId w:val="20"/>
+    <w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/></w:lvlOverride>
+  </w:num>
+</w:numbering>

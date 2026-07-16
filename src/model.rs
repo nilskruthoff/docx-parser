@@ -127,6 +127,27 @@ pub struct Heading {
     pub provenance: Provenance,
 }
 
+/// The document title as identified by its paragraph style.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Title {
+    pub content: Vec<Inline>,
+    pub provenance: Provenance,
+}
+
+/// The document subtitle as identified by its paragraph style.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subtitle {
+    pub content: Vec<Inline>,
+    pub provenance: Provenance,
+}
+
+/// A semantically quoted paragraph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockQuote {
+    pub content: Vec<Inline>,
+    pub provenance: Provenance,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListMarker {
     Bullet,
@@ -184,6 +205,9 @@ pub struct UnknownElement {
 pub enum DocumentElement {
     Paragraph(Paragraph),
     Heading(Heading),
+    Title(Title),
+    Subtitle(Subtitle),
+    BlockQuote(BlockQuote),
     List(List),
     Table(Table),
     Image(ImageElement),
@@ -195,6 +219,9 @@ impl DocumentElement {
         match self {
             Self::Paragraph(v) => &v.provenance,
             Self::Heading(v) => &v.provenance,
+            Self::Title(v) => &v.provenance,
+            Self::Subtitle(v) => &v.provenance,
+            Self::BlockQuote(v) => &v.provenance,
             Self::List(v) => &v.provenance,
             Self::Table(v) => &v.provenance,
             Self::Image(v) => &v.provenance,

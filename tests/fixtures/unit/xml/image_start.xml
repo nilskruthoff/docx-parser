@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="urn:word" xmlns:r="urn:relationships" xmlns:a="urn:drawing"><w:body><w:p><w:r>
+  <a:blip r:embed="rIdImage"><a:extLst><a:ext uri="test"/></a:extLst></a:blip>
+</w:r></w:p></w:body></w:document>
