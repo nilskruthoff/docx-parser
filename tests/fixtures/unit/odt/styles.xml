@@ -3,7 +3,16 @@
   <office:styles>
     <style:style style:name="Emphasis" style:family="text"><style:text-properties fo:font-style="italic"/></style:style>
     <style:style style:name="Strong" style:family="text" style:parent-style-name="Emphasis"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="Quote" style:family="paragraph"><style:text-properties fo:font-style="italic"/></style:style>
+    <style:style style:name="Title" style:family="paragraph"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="Subtitle" style:family="paragraph"><style:text-properties fo:font-style="italic"/></style:style>
     <text:list-style style:name="Bullets"><text:list-level-style-bullet text:level="1"/></text:list-style>
     <text:list-style style:name="Numbers"><text:list-level-style-number text:level="1" text:num-format="1"/></text:list-style>
   </office:styles>
+  <office:master-styles>
+    <style:master-page style:name="Standard">
+      <style:header><text:p>Header</text:p></style:header>
+      <style:footer><text:p>Footer <text:page-number>4</text:page-number></text:p></style:footer>
+    </style:master-page>
+  </office:master-styles>
 </office:document-styles>

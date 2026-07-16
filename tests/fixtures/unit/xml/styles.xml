@@ -10,4 +10,20 @@
     <w:pPr><w:outlineLvl w:val="1"/></w:pPr>
     <w:rPr><w:i/></w:rPr>
   </w:style>
+  <w:style w:styleId="Quote">
+    <w:name w:val="Quote"/>
+    <w:rPr><w:i/></w:rPr>
+  </w:style>
+  <w:style w:styleId="IntenseQuote">
+    <w:name w:val="Intense Quote"/>
+    <w:rPr><w:b/><w:i/></w:rPr>
+  </w:style>
+  <w:style w:styleId="Titel">
+    <w:name w:val="Title"/>
+    <w:rPr><w:b/></w:rPr>
+  </w:style>
+  <w:style w:styleId="Untertitel">
+    <w:name w:val="Subtitle"/>
+    <w:rPr><w:i/></w:rPr>
+  </w:style>
 </w:styles>

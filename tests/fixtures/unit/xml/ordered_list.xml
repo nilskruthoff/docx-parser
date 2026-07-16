@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="urn:word"><w:body>
+  <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>first number</w:t></w:r></w:p>
+  <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>second number</w:t></w:r></w:p>
+  <w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>nested number</w:t></w:r></w:p>
+  <w:p><w:pPr><w:numPr><w:ilvl w:val="2"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>nested nested number</w:t></w:r></w:p>
+</w:body></w:document>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="urn:word">
+  <w:body>
+    <w:p><w:pPr><w:pStyle w:val="Titel"/></w:pPr><w:r><w:t>Document title</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Untertitel"/></w:pPr><w:r><w:t>Document subtitle</w:t></w:r></w:p>
+  </w:body>
+</w:document>

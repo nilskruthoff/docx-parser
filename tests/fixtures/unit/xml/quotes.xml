@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="urn:word"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr><w:r><w:t>A quote</w:t></w:r></w:p>
+  <w:p><w:pPr><w:pStyle w:val="IntenseQuote"/></w:pPr><w:r><w:t>A very important quote</w:t></w:r></w:p>
+  <w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Explicitly bold quote</w:t></w:r></w:p>
+</w:body></w:document>
