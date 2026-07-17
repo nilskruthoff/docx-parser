@@ -386,3 +386,34 @@ fn renders_representative_docx_content_to_markdown() {
     assert!(markdown.contains("- First item"));
     assert!(markdown.contains("1. first number"));
 }
+
+#[test]
+fn streams_docx_pages_with_local_resources() {
+    let container = DocumentContainer::open_as(fixture_path(), config(), DocumentFormat::Docx)
+        .expect("open DOCX fixture");
+    let pages = container
+        .iter_pages()
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    assert_eq!(pages.len(), 3);
+    assert_eq!(
+        pages
+            .iter()
+            .map(|page| page.page_number)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert!(
+        pages[0]
+            .to_markdown()
+            .unwrap()
+            .starts_with("<!-- Page 1 -->")
+    );
+    assert!(pages[0].images.is_empty());
+    assert_eq!(pages[2].images.len(), 1);
+    assert_eq!(pages[2].comments.len(), 1);
+    assert_eq!(pages[2].footnotes.len(), 1);
+    assert_eq!(pages[2].endnotes.len(), 1);
+}
