@@ -8,6 +8,10 @@ use crate::model::*;
 use crate::package::{list_parts, read_part};
 use crate::{DocumentFormat, Error, ParserConfig, Result};
 
+mod pages;
+pub use pages::PageIterator;
+pub(crate) use pages::page_iterator;
+
 const OFFICE_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
 const STRICT_OFFICE_REL: &str =
@@ -34,6 +38,7 @@ struct Style {
     italic: Option<bool>,
     underline: Option<bool>,
     strikethrough: Option<bool>,
+    page_break_before: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +52,9 @@ struct OdtStyle {
     parent: Option<String>,
     format: TextFormat,
     markers: HashMap<u8, ListMarker>,
+    break_before_page: bool,
+    break_after_page: bool,
+    master_page: Option<String>,
 }
 
 #[derive(Default)]
@@ -431,6 +439,7 @@ fn parse_styles(data: &[u8], part: &str) -> Result<HashMap<String, Style>> {
                     b"i" => current.italic = Some(bool_val(&e, true)),
                     b"u" => current.underline = Some(val(&e).is_none_or(|v| v != "none")),
                     b"strike" => current.strikethrough = Some(bool_val(&e, true)),
+                    b"pageBreakBefore" => current.page_break_before = Some(bool_val(&e, true)),
                     b"vertAlign" => {
                         current.format.vertical_align = vertical(&val(&e).unwrap_or_default())
                     }
@@ -482,6 +491,9 @@ fn resolved_style(styles: &HashMap<String, Style>, id: &str) -> Style {
         }
         if let Some(value) = style.strikethrough {
             out.format.strikethrough = value;
+        }
+        if style.page_break_before.is_some() {
+            out.page_break_before = style.page_break_before;
         }
         out
     }
@@ -1638,8 +1650,21 @@ fn scan_odt_styles(data: &[u8], part: &str, styles: &mut HashMap<String, OdtStyl
                 name = attr(&e, b"name");
                 style = OdtStyle {
                     parent: attr(&e, b"parent-style-name"),
+                    master_page: attr(&e, b"master-page-name"),
                     ..OdtStyle::default()
                 };
+            }
+            Event::Empty(e) if matches!(local(e.name().as_ref()), b"style" | b"list-style") => {
+                if let Some(style_name) = attr(&e, b"name") {
+                    styles.insert(
+                        style_name,
+                        OdtStyle {
+                            parent: attr(&e, b"parent-style-name"),
+                            master_page: attr(&e, b"master-page-name"),
+                            ..OdtStyle::default()
+                        },
+                    );
+                }
             }
             Event::Start(e) | Event::Empty(e)
                 if name.is_some() && local(e.name().as_ref()) == b"text-properties" =>
@@ -1660,6 +1685,12 @@ fn scan_odt_styles(data: &[u8], part: &str, styles: &mut HashMap<String, OdtStyl
                         VerticalAlign::Baseline
                     };
                 }
+            }
+            Event::Start(e) | Event::Empty(e)
+                if name.is_some() && local(e.name().as_ref()) == b"paragraph-properties" =>
+            {
+                style.break_before_page = attr(&e, b"break-before").as_deref() == Some("page");
+                style.break_after_page = attr(&e, b"break-after").as_deref() == Some("page");
             }
             Event::Start(e) | Event::Empty(e)
                 if name.is_some() && local(e.name().as_ref()) == b"list-level-style-number" =>
@@ -2576,46 +2607,105 @@ fn parse_odt_master_pages(
     let mut reader = xml_reader(&data);
     let mut buf = Vec::new();
     let mut current_name = None;
-    let mut current_header = Vec::new();
-    let mut current_footer = Vec::new();
-    let mut pages = Vec::new();
+    let mut current_headers: Vec<(HeaderFooterKind, String, Vec<DocumentElement>)> = Vec::new();
+    let mut current_footers: Vec<(HeaderFooterKind, String, Vec<DocumentElement>)> = Vec::new();
+    let mut headers = BTreeMap::new();
+    let mut footers = BTreeMap::new();
+    let mut sections = Vec::new();
     let mut parsed = OdtParsed::default();
     loop {
         match xml_event(&mut reader, &mut buf, "styles.xml")? {
             Event::Start(e) if local(e.name().as_ref()) == b"master-page" => {
                 current_name = attr(&e, b"name");
-                current_header.clear();
-                current_footer.clear();
+                current_headers.clear();
+                current_footers.clear();
             }
-            Event::Start(e) if current_name.is_some() && local(e.name().as_ref()) == b"header" => {
-                current_header = parse_odt_story_container(
+            Event::Start(e)
+                if current_name.is_some()
+                    && matches!(
+                        local(e.name().as_ref()),
+                        b"header" | b"header-left" | b"header-first"
+                    ) =>
+            {
+                let tag = local(e.name().as_ref()).to_vec();
+                let kind = match tag.as_slice() {
+                    b"header-left" => HeaderFooterKind::Even,
+                    b"header-first" => HeaderFooterKind::First,
+                    _ => HeaderFooterKind::Default,
+                };
+                let elements = parse_odt_story_container(
                     &mut reader,
-                    b"header",
+                    &tag,
                     StoryType::Header,
                     styles,
                     config,
                     &mut parsed,
                 )?;
+                current_headers.push((kind, String::from_utf8_lossy(&tag).into_owned(), elements));
             }
-            Event::Start(e) if current_name.is_some() && local(e.name().as_ref()) == b"footer" => {
-                current_footer = parse_odt_story_container(
+            Event::Start(e)
+                if current_name.is_some()
+                    && matches!(
+                        local(e.name().as_ref()),
+                        b"footer" | b"footer-left" | b"footer-first"
+                    ) =>
+            {
+                let tag = local(e.name().as_ref()).to_vec();
+                let kind = match tag.as_slice() {
+                    b"footer-left" => HeaderFooterKind::Even,
+                    b"footer-first" => HeaderFooterKind::First,
+                    _ => HeaderFooterKind::Default,
+                };
+                let elements = parse_odt_story_container(
                     &mut reader,
-                    b"footer",
+                    &tag,
                     StoryType::Footer,
                     styles,
                     config,
                     &mut parsed,
                 )?;
+                current_footers.push((kind, String::from_utf8_lossy(&tag).into_owned(), elements));
             }
             Event::End(e) if local(e.name().as_ref()) == b"master-page" => {
-                if let Some(name) = current_name.take()
-                    && (!current_header.is_empty() || !current_footer.is_empty())
-                {
-                    pages.push((
-                        name,
-                        std::mem::take(&mut current_header),
-                        std::mem::take(&mut current_footer),
-                    ));
+                if let Some(name) = current_name.take() {
+                    let index = sections.len();
+                    let mut header_references = Vec::new();
+                    let mut footer_references = Vec::new();
+                    for (kind, tag, elements) in std::mem::take(&mut current_headers) {
+                        if elements.is_empty() {
+                            continue;
+                        }
+                        let id = format!("styles.xml#{name}/{tag}");
+                        header_references.push(id.clone());
+                        headers.insert(
+                            id,
+                            Story {
+                                kind: Some(kind),
+                                used_by_sections: vec![index],
+                                elements,
+                            },
+                        );
+                    }
+                    for (kind, tag, elements) in std::mem::take(&mut current_footers) {
+                        if elements.is_empty() {
+                            continue;
+                        }
+                        let id = format!("styles.xml#{name}/{tag}");
+                        footer_references.push(id.clone());
+                        footers.insert(
+                            id,
+                            Story {
+                                kind: Some(kind),
+                                used_by_sections: vec![index],
+                                elements,
+                            },
+                        );
+                    }
+                    sections.push(Section {
+                        index,
+                        header_references,
+                        footer_references,
+                    });
                 }
             }
             Event::Eof => break,
@@ -2623,48 +2713,8 @@ fn parse_odt_master_pages(
         }
         buf.clear();
     }
-    let selected = pages
-        .iter()
-        .position(|(name, _, _)| name == "Standard")
-        .or_else(|| (!pages.is_empty()).then_some(0));
-    let Some(index) = selected else {
-        return Ok(OdtStories::default());
-    };
-    let (name, header_elements, footer_elements) = pages.swap_remove(index);
-    let header_id = format!("styles.xml#{name}/header");
-    let footer_id = format!("styles.xml#{name}/footer");
-    let mut headers = BTreeMap::new();
-    let mut footers = BTreeMap::new();
-    let mut header_references = Vec::new();
-    let mut footer_references = Vec::new();
-    if !header_elements.is_empty() {
-        header_references.push(header_id.clone());
-        headers.insert(
-            header_id,
-            Story {
-                kind: Some(HeaderFooterKind::Default),
-                used_by_sections: vec![0],
-                elements: header_elements,
-            },
-        );
-    }
-    if !footer_elements.is_empty() {
-        footer_references.push(footer_id.clone());
-        footers.insert(
-            footer_id,
-            Story {
-                kind: Some(HeaderFooterKind::Default),
-                used_by_sections: vec![0],
-                elements: footer_elements,
-            },
-        );
-    }
     Ok(OdtStories {
-        sections: vec![Section {
-            index: 0,
-            header_references,
-            footer_references,
-        }],
+        sections,
         headers,
         footers,
     })
