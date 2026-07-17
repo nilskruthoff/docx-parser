@@ -351,3 +351,27 @@ fn extracts_odt_comments_without_leaking_metadata_into_body() {
     let supplementary = &markdown[markdown.find("[^fn-1]:").expect("footnote definition")..];
     assert_eq!(supplementary, expected("supplementary_with_comments.md"));
 }
+
+#[test]
+fn streams_odt_pages_from_inherited_style_breaks() {
+    let container = DocumentContainer::open_as(fixture_path(), config(), DocumentFormat::Odt)
+        .expect("open ODT fixture");
+    let pages = container
+        .iter_pages()
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    assert_eq!(pages.len(), 3);
+    assert_eq!(
+        pages
+            .iter()
+            .map(|page| page.page_number)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert!(pages[0].images.is_empty());
+    assert_eq!(pages[2].images.len(), 1);
+    assert_eq!(pages[2].footnotes.len(), 1);
+    assert_eq!(pages[2].endnotes.len(), 1);
+}

@@ -76,6 +76,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Streaming pages
+
+`iter_pages` lazily reads the main XML story and yields self-contained,
+one-based `DocumentPage` values. Boundaries are block-aligned: a marker inside
+a paragraph, a list, or a table cell takes effect only after the complete
+top-level block. `iter_pages_with(PageBoundaryMode)` can select explicit
+breaks, stored renderer hints, or both.
+
+```rust
+use docx_to_md::{DocumentContainer, ParserConfig};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let document = DocumentContainer::open("report.docx", ParserConfig::default())?;
+    for page in document.iter_pages()? {
+        let page = page?;
+        println!("Page {}", page.page_number);
+        println!("{}", page.to_markdown()?);
+    }
+    Ok(())
+}
+```
+
+DOCX `lastRenderedPageBreak` and ODT `soft-page-break` values are stored
+layout hints. The crate does not run Word, LibreOffice, or another layout
+engine, so streamed pages are a structural approximation rather than newly
+calculated physical pages.
+
 ### Image handling
 Images default to embedded data URLs. To save and link them instead:
 
@@ -115,6 +142,7 @@ available for custom storage.
 | `include_footnotes`         | `bool`              | `true`       | Whether footnotes are parsed and rendered as Markdown footnote references and definitions.                                         |
 | `include_endnotes`          | `bool`              | `true`       | Whether endnotes are parsed and rendered as Markdown footnote references and definitions.                                          |
 | `include_comments`          | `bool`              | `false`      | Whether comments are parsed, referenced inline, and rendered in a `Comments` blockquote section.                                   |
+| `include_page_number_as_comment` | `bool`          | `true`       | Prefixes page-local Markdown with `<!-- Page n -->`; full-document Markdown ignores this option.                                  |
 <br/>
 
 #### Member of `ImageHandlingMode`

@@ -271,6 +271,19 @@ fn parses_odt_styles_structure_and_image_reference() {
 }
 
 #[test]
+fn parses_odt_page_break_styles() {
+    let package = fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/integration/odt/fixture.odt"),
+    )
+    .unwrap();
+    let content = required_part(&package, "content.xml").unwrap();
+    let styles = parse_odt_styles(&package, &content).unwrap();
+    assert!(styles["P6"].break_before_page);
+    assert!(styles["P15"].break_before_page);
+}
+
+#[test]
 fn odt_parser_loads_referenced_image_bytes() {
     let document = parse_odt(
         &odt_package(),

@@ -3,7 +3,10 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use crate::parser;
-use crate::{Document, DocumentElement, DocumentFormat, Error, Metadata, ParserConfig, Result};
+use crate::{
+    Document, DocumentElement, DocumentFormat, Error, Metadata, PageBoundaryMode, PageIterator,
+    ParserConfig, Result,
+};
 
 /// A detected DOCX or ODT package kept in memory for repeatable parsing.
 #[derive(Debug, Clone)]
@@ -98,6 +101,16 @@ impl DocumentContainer {
     pub fn iter_blocks(&self) -> Result<BlockIterator> {
         let elements = parser::parse_main(&self.bytes, self.format, &self.config)?;
         Ok(BlockIterator(elements.into_iter()))
+    }
+
+    /// Lazily iterate block-aligned pages using all available boundary hints.
+    pub fn iter_pages(&self) -> Result<PageIterator<'_>> {
+        self.iter_pages_with(PageBoundaryMode::Combined)
+    }
+
+    /// Lazily iterate block-aligned pages using the selected boundary mode.
+    pub fn iter_pages_with(&self, mode: PageBoundaryMode) -> Result<PageIterator<'_>> {
+        parser::page_iterator(&self.bytes, self.format, self.config.clone(), mode)
     }
 
     pub fn convert_to_md(&self) -> Result<String> {

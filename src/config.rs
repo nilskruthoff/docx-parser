@@ -28,6 +28,11 @@ pub struct ParserConfig {
     pub include_footnotes: bool,
     pub include_endnotes: bool,
     pub include_comments: bool,
+    /// Prefix page-local Markdown with `<!-- Page n -->`.
+    ///
+    /// This option is only used by [`crate::DocumentPage::to_markdown`].
+    /// Full-document rendering remains unchanged.
+    pub include_page_number_as_comment: bool,
 }
 
 impl Default for ParserConfig {
@@ -43,6 +48,7 @@ impl Default for ParserConfig {
             include_footnotes: true,
             include_endnotes: true,
             include_comments: false,
+            include_page_number_as_comment: true,
         }
     }
 }
@@ -75,6 +81,11 @@ impl ParserConfigBuilder {
     setter!(include_footnotes, include_footnotes, bool);
     setter!(include_endnotes, include_endnotes, bool);
     setter!(include_comments, include_comments, bool);
+    setter!(
+        include_page_number_as_comment,
+        include_page_number_as_comment,
+        bool
+    );
 
     pub fn image_output_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.0.image_output_path = Some(path.into());
