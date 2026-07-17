@@ -14,3 +14,4 @@ pub use config::{ImageHandlingMode, ImageMode, ParserConfig, ParserConfigBuilder
 pub use error::{Error, Result};
 pub use model::*;
 pub use package::{DocumentContainer, DocxContainer};
+pub use parser::PageIterator;
