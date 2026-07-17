@@ -237,6 +237,30 @@ pub enum HeaderFooterKind {
     Default,
 }
 
+/// Selects which stored page-boundary information is honored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum PageBoundaryMode {
+    /// Honor explicit breaks and stored renderer hints. Explicit breaks win
+    /// when both occur in the same top-level block.
+    #[default]
+    Combined,
+    /// Honor authored page/section breaks only.
+    ExplicitOnly,
+    /// Honor only stored layout hints (`lastRenderedPageBreak` and
+    /// `soft-page-break`).
+    RenderedHintsOnly,
+}
+
+/// The boundary that ended a streamed page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PageBoundary {
+    Explicit,
+    RenderedHint,
+    EndOfDocument,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Story {
     pub kind: Option<HeaderFooterKind>,
@@ -308,5 +332,61 @@ impl Document {
     /// Save all loaded image resources. Existing files are replaced.
     pub fn extract_images(&self, directory: impl AsRef<Path>) -> Result<Vec<std::path::PathBuf>> {
         crate::render::extract_images(self, directory.as_ref())
+    }
+}
+
+/// A self-contained, block-aligned approximation of one document page.
+///
+/// Page boundaries come from information stored in the source document; no
+/// word-processing layout engine is run.
+#[derive(Debug, Clone)]
+pub struct DocumentPage {
+    /// One-based page number in iterator order.
+    pub page_number: usize,
+    pub elements: Vec<DocumentElement>,
+    pub boundary: PageBoundary,
+    pub header: Option<Story>,
+    pub footer: Option<Story>,
+    pub comments: Vec<Annotation>,
+    pub footnotes: Vec<Annotation>,
+    pub endnotes: Vec<Annotation>,
+    pub images: BTreeMap<String, ImageResource>,
+    pub(crate) config: ParserConfig,
+}
+
+impl DocumentPage {
+    /// Render only this page and its referenced supplementary content.
+    pub fn to_markdown(&self) -> Result<String> {
+        let mut config = self.config.clone();
+        config.include_document_metadata = false;
+        let mut document = Document {
+            elements: self.elements.clone(),
+            comments: self.comments.clone(),
+            footnotes: self.footnotes.clone(),
+            endnotes: self.endnotes.clone(),
+            images: self.images.clone(),
+            ..Document::default()
+        };
+        if let Some(story) = &self.header {
+            document.headers.insert("page/header".into(), story.clone());
+        }
+        if let Some(story) = &self.footer {
+            document.footers.insert("page/footer".into(), story.clone());
+        }
+        let body = crate::render::render(&document, &config)?;
+        if config.include_page_number_as_comment {
+            Ok(format!("<!-- Page {} -->\n\n{body}", self.page_number))
+        } else {
+            Ok(body)
+        }
+    }
+
+    /// Save the image resources referenced by this page.
+    pub fn extract_images(&self, directory: impl AsRef<Path>) -> Result<Vec<std::path::PathBuf>> {
+        let document = Document {
+            images: self.images.clone(),
+            ..Document::default()
+        };
+        crate::render::extract_images(&document, directory.as_ref())
     }
 }
