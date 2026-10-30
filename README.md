@@ -160,7 +160,7 @@ Include the following line in your Cargo.toml dependencies section:
 
 ```toml
 [dependencies]
-docx-to-md = "0.1.0"
+docx-to-md = "0.2.0"
 ```
 
 ---

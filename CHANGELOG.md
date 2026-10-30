@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** `Error::Zip` now wraps the new opaque `docx_to_md::ZipError`
+  instead of `zip::result::ZipError`, and `Error` no longer implements
+  `From<zip::result::ZipError>`. The underlying `zip` error is still available
+  through `std::error::Error::source`. Future `zip` upgrades therefore no
+  longer change the public API
+- **Breaking:** The `source` field of `Error::Xml` is now the new opaque
+  `docx_to_md::XmlError` instead of `quick_xml::Error`. The underlying
+  `quick-xml` error is still available through `std::error::Error::source`, so
+  future `quick-xml` upgrades no longer change the public API
+
+### Fixed
+
+- The published package now includes the `LICENSE-MIT` file, which was
+  missing due to a misspelled entry in the `include` list
+
+### Security
+
+- Upgraded `zip` from 8.6.0 to 9.0.5, which fixes the advisories
+  GHSA-m665-v7pm-7grj, GHSA-q7v9-x93c-xqv3, GHSA-8hxf-qr8p-62x4,
+  GHSA-hjqx-j4rw-g7xv, and GHSA-9hj8-73fh-9963
+
 ## [0.1.0] - 2026-07-17
 
 ### Added

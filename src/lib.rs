@@ -11,7 +11,7 @@ mod parser;
 mod render;
 
 pub use config::{ImageHandlingMode, ImageMode, ParserConfig, ParserConfigBuilder};
-pub use error::{Error, Result};
+pub use error::{Error, Result, XmlError, ZipError};
 pub use model::*;
 pub use package::{DocumentContainer, DocxContainer};
 pub use parser::PageIterator;
