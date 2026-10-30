@@ -170,7 +170,7 @@ fn detect(bytes: &[u8]) -> Result<DocumentFormat> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
     let mut names = Vec::with_capacity(archive.len());
     for index in 0..archive.len() {
-        names.push(archive.by_index(index)?.name().replace('\\', "/"));
+        names.push(archive.by_index(index)?.name()?.replace('\\', "/"));
     }
     if names.iter().any(|v| v == "[Content_Types].xml")
         && names.iter().any(|v| v == "word/document.xml")
@@ -255,7 +255,7 @@ pub(crate) fn list_parts(bytes: &[u8]) -> Result<Vec<String>> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
     let mut names = Vec::new();
     for i in 0..archive.len() {
-        names.push(archive.by_index(i)?.name().to_owned());
+        names.push(archive.by_index(i)?.name()?.into_owned());
     }
     Ok(names)
 }
