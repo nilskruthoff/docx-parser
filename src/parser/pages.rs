@@ -77,10 +77,7 @@ impl Scanner {
         self.reader
             .read_event_into(buf)
             .map(Event::into_owned)
-            .map_err(|source| Error::Xml {
-                part: self.part.clone(),
-                source,
-            })
+            .map_err(|source| Error::xml(self.part.clone(), source))
     }
 
     fn next_block(

@@ -2809,10 +2809,9 @@ fn xml_event<'a>(
     _buf: &mut Vec<u8>,
     part: &str,
 ) -> Result<Event<'a>> {
-    reader.read_event().map_err(|source| Error::Xml {
-        part: part.into(),
-        source,
-    })
+    reader
+        .read_event()
+        .map_err(|source| Error::xml(part, source))
 }
 
 fn local(name: &[u8]) -> &[u8] {

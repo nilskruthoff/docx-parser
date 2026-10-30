@@ -167,10 +167,17 @@ impl std::ops::Deref for DocxContainer {
 /// A document is **ODT** is detected if it contains either `content.xml` or `mimetype` with the
 /// value `application/vnd.oasis.opendocument.text`.
 fn detect(bytes: &[u8]) -> Result<DocumentFormat> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(Error::zip)?;
     let mut names = Vec::with_capacity(archive.len());
     for index in 0..archive.len() {
-        names.push(archive.by_index(index)?.name().replace('\\', "/"));
+        names.push(
+            archive
+                .by_index(index)
+                .map_err(Error::zip)?
+                .name()
+                .map_err(Error::zip)?
+                .replace('\\', "/"),
+        );
     }
     if names.iter().any(|v| v == "[Content_Types].xml")
         && names.iter().any(|v| v == "word/document.xml")
@@ -221,7 +228,7 @@ fn detect(bytes: &[u8]) -> Result<DocumentFormat> {
 /// Paths use `/` internally, independent of the operating system.
 /// The package will be held in memory completely.
 pub(crate) fn read_part(bytes: &[u8], name: &str) -> Result<Option<Vec<u8>>> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(Error::zip)?;
     match archive.by_name(name) {
         Ok(mut file) => {
             let mut out = Vec::with_capacity(file.size() as usize);
@@ -229,7 +236,7 @@ pub(crate) fn read_part(bytes: &[u8], name: &str) -> Result<Option<Vec<u8>>> {
             Ok(Some(out))
         }
         Err(zip::result::ZipError::FileNotFound) => Ok(None),
-        Err(error) => Err(error.into()),
+        Err(error) => Err(Error::zip(error)),
     }
 }
 
@@ -252,10 +259,17 @@ pub(crate) fn read_part(bytes: &[u8], name: &str) -> Result<Option<Vec<u8>>> {
 /// * The byte slice does not represent a valid ZIP archive.
 /// * There is an issue accessing any file within the ZIP archive.
 pub(crate) fn list_parts(bytes: &[u8]) -> Result<Vec<String>> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(Error::zip)?;
     let mut names = Vec::new();
     for i in 0..archive.len() {
-        names.push(archive.by_index(i)?.name().to_owned());
+        names.push(
+            archive
+                .by_index(i)
+                .map_err(Error::zip)?
+                .name()
+                .map_err(Error::zip)?
+                .into_owned(),
+        );
     }
     Ok(names)
 }
